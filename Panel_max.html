@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MAX Volume Shader</title>
+  <style>
+    html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
+    canvas { display:block; width:100%; height:100%; }
+  </style>
+</head>
+<body>
+  <canvas id="glcanvas"></canvas>
+  <script>
+  (function(){
+    const canvas=document.getElementById('glcanvas');
+    const gl=canvas.getContext('webgl2',{antialias:false});
+    if(!gl){document.body.innerHTML="<p style='color:#f66;padding:20px;'>WebGL2 not supported.</p>";return;}
+
+    function resize(){
+      const dpr=Math.min(window.devicePixelRatio||1,2);
+      canvas.width=Math.floor(window.innerWidth*dpr);
+      canvas.height=Math.floor(window.innerHeight*dpr);
+      gl.viewport(0,0,canvas.width,canvas.height);
+    }
+    window.addEventListener('resize',resize); resize();
+
+    const vs=`#version 300 es
+    in vec2 aPos; out vec2 vUv;
+    void main(){ vUv=aPos*0.5+0.5; gl_Position=vec4(aPos,0,1); }`;
+
+    const fs=`#version 300 es
+    precision highp float;
+    out vec4 outColor; in vec2 vUv;
+    uniform vec2 iResolution; uniform float iTime;
+
+    float rnd(vec3 p){return fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453);}
+    float noise(vec3 p){
+      vec3 i=floor(p); vec3 f=fract(p); f=f*f*(3.0-2.0*f);
+      float n=mix(mix(mix(rnd(i+vec3(0,0,0)),rnd(i+vec3(1,0,0)),f.x),
+                      mix(rnd(i+vec3(0,1,0)),rnd(i+vec3(1,1,0)),f.x),f.y),
+                  mix(mix(rnd(i+vec3(0,0,1)),rnd(i+vec3(1,0,1)),f.x),
+                      mix(rnd(i+vec3(0,1,1)),rnd(i+vec3(1,1,1)),f.x),f.y),f.z);
+      return n;
+    }
+    float fbm(vec3 p){
+      float v=0.0,a=0.5;
+      for(int i=0;i<7;i++){ v+=a*noise(p); p*=2.3; a*=0.55; }
+      return v;
+    }
+
+    void main(){
+      vec2 uv=(gl_FragCoord.xy/iResolution.xy)*2.0-1.0;
+      uv.x*=iResolution.x/iResolution.y;
+      vec3 ro=vec3(0,0,4);
+      vec3 rd=normalize(vec3(uv,-1.6));
+
+      float t=0.0; vec3 col=vec3(0); float alpha=0.0;
+      for(int i=0;i<160;i++){ // way more steps
+        vec3 p=ro+rd*t;
+        float d=length(p)-1.0;
+        float f=fbm(p*3.0+iTime*0.07);
+        float density=smoothstep(0.5,-0.5,d+(f-0.5)*0.7);
+        vec3 c=0.5+0.5*cos(6.2831*(f+vec3(0,0.33,0.67)));
+        float a=density*0.15;
+        col+=(1.0-alpha)*c*a;
+        alpha+=(1.0-alpha)*a;
+        t+=0.05;
+        if(alpha>0.995) break;
+      }
+      col=pow(col,vec3(0.85));
+      outColor=vec4(col,1);
+    }`;
+
+    function compile(type,src){
+      const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+      if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      return s;
+    }
+    const prog=gl.createProgram();
+    gl.attachShader(prog,compile(gl.VERTEX_SHADER,vs));
+    gl.attachShader(prog,compile(gl.FRAGMENT_SHADER,fs));
+    gl.bindAttribLocation(prog,0,"aPos");
+    gl.linkProgram(prog); gl.useProgram(prog);
+
+    const quad=gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER,quad);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+
+    const uRes=gl.getUniformLocation(prog,"iResolution");
+    const uTime=gl.getUniformLocation(prog,"iTime");
+
+    let start=performance.now();
+    function frame(){
+      resize();
+      gl.uniform2f(uRes,canvas.width,canvas.height);
+      gl.uniform1f(uTime,(performance.now()-start)/1000);
+      gl.drawArrays(gl.TRIANGLES,0,6);
+      requestAnimationFrame(frame);
+    }
+    frame();
+  })();
+  </script>
+</body>
+</html>
